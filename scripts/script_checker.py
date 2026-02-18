@@ -54,3 +54,13 @@ def main() -> None:
         for p in missing_files[:10]:
             print("  ", p)
         raise SystemExit("Fix UC_IMAGE_ROOT or img_url paths.")
+    
+    print("Check passed:")
+    print(f"- Rows: {len(df)}")
+    print(f"- CSV: {csv_path}")
+    print(f"- Image root: {image_root}")
+    print("- Labels OK, sample images exist")
+
+
+if __name__ == "__main__":
+    main()
