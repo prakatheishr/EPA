@@ -7,6 +7,27 @@ from PIL import Image
 MES_ALLOWED = {"MES-0", "MES-1", "MES-2", "MES-3"}
 REQUIRED_COLS = {"img_url", "mes_scoring_0_3", "description"}
 
+EXTS = [".jpg", ".jpeg", ".png"]
+
+
+def resolve_image_path(image_root: Path, img_url: str) -> Path | None:
+    p = image_root / img_url
+    if p.exists():
+        return p
+
+    # Try extension swaps only if it looks like an image we can swap
+    name_lower = p.name.lower()
+    for s in EXTS:
+        if name_lower.endswith(s):
+            stem = p.with_suffix("")  # remove extension
+            for alt in EXTS:
+                alt_p = stem.with_suffix(alt)
+                if alt_p.exists():
+                    return alt_p
+
+    return None
+
+
 def main() -> None:
     csv_path = os.environ.get("UC_DATA_CSV")
     image_root = os.environ.get("UC_IMAGE_ROOT")
@@ -27,7 +48,7 @@ def main() -> None:
         raise SystemExit(f"Image root not found: {image_root}")
 
     df = pd.read_csv(csv_path)
-    
+
     missing = REQUIRED_COLS - set(df.columns)
     if missing:
         raise SystemExit(f"CSV missing columns: {missing}")
@@ -40,10 +61,13 @@ def main() -> None:
     sample = df.sample(min(25, len(df)), random_state=42)
     missing_files = []
     for _, row in sample.iterrows():
-        p = image_root / str(row["img_url"])
-        if not p.exists():
-            missing_files.append(str(p))
+        img_url = str(row["img_url"])
+        p = resolve_image_path(image_root, img_url)
+
+        if p is None:
+            missing_files.append(str(image_root / img_url))
             continue
+
         try:
             Image.open(p).convert("RGB")
         except Exception as e:
@@ -53,8 +77,8 @@ def main() -> None:
         print("Some files missing (showing up to 10):")
         for p in missing_files[:10]:
             print("  ", p)
-        raise SystemExit("Fix UC_IMAGE_ROOT or img_url paths.")
-    
+        raise SystemExit("Fix UC_IMAGE_ROOT or img_url paths (or missing files).")
+
     print("Check passed:")
     print(f"- Rows: {len(df)}")
     print(f"- CSV: {csv_path}")
