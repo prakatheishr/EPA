@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
-from dataset_mm import UCMultimodalDataset
-from model_clip_rn50_clinicalbert import ClipResNetBert, clip_contrastive_loss
+from dataset import UCMultimodalDataset
+from clip_model import ClipResNetBert, clip_contrastive_loss
 
 # trains the CLIP-style model on train pairs, validates on val, saves best checkpoint.
 
