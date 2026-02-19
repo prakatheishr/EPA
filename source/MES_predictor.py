@@ -24,6 +24,7 @@ PROMPTS: Dict[int, List[str]] = {
     3: ["Mayo endoscopic score 3", "severe inflammation", "ulceration and bleeding", "complete obliteration of the vascular pattern", "marked erythema severe friability", "ulcers bleeding"],
 }
 
+# pyTorch default
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
