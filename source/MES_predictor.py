@@ -18,10 +18,10 @@ MES_MAP = {"MES-0": 0, "MES-1": 1, "MES-2": 2, "MES-3": 3}
 INV_MES = {v: k for k, v in MES_MAP.items()}
 
 PROMPTS: Dict[int, List[str]] = {
-    0: ["Mayo endoscopic score 0", "normal mucosa", "no visible inflammation"],
-    1: ["Mayo endoscopic score 1", "mild inflammation", "mild erythema"],
-    2: ["Mayo endoscopic score 2", "moderate inflammation", "marked erythema and friability"],
-    3: ["Mayo endoscopic score 3", "severe inflammation", "ulceration and bleeding"],
+    0: ["Mayo endoscopic score 0", "normal mucosa", "normal vascular pattern", "no visible erosions", "no visible bleeding"],
+    1: ["Mayo endoscopic score 1", "mild inflammation", "moderate erythema", "patchy obliteration of the vascular pattern", "low friability", "erosions mucosal bleeding"],
+    2: ["Mayo endoscopic score 2", "moderate inflammation", "marked erythema and friability", "complete obliteration of the vascular pattern"],
+    3: ["Mayo endoscopic score 3", "severe inflammation", "ulceration and bleeding", "complete obliteration of the vascular pattern", "marked erythema severe friability", "ulcers bleeding"],
 }
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
