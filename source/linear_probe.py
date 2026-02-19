@@ -16,7 +16,6 @@ from clip_model import ClipResNetBert
 MES_MAP = {"MES-0": 0, "MES-1": 1, "MES-2": 2, "MES-3": 3}
 
 # pyTorch deafult
-
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
