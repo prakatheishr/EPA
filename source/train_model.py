@@ -1,14 +1,14 @@
 import os
 from pathlib import Path
 import json
-
+import argparse
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
 from dataset import UCMultimodalDataset
-from clip_model import ClipResNetBert, clip_contrastive_loss
+from clip_model import ClipDualEncoder, clip_contrastive_loss
 
 # trains the CLIP-style model on train pairs, validates on val, saves best checkpoint.
 
@@ -39,6 +39,14 @@ def collate_fn(batch, tokenizer, max_len: int = 128):
     }
 
 def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--image_encoder", default="resnet50")
+    parser.add_argument("--text_encoder", default="emilyalsentzer/Bio_ClinicalBERT")
+    parser.add_argument("--output_dir", default="runs/clip_experiment")
+
+    args = parser.parse_args()
+
     # Paths from env vars
     csv_path = os.environ.get("UC_DATA_CSV")
     image_root = os.environ.get("UC_IMAGE_ROOT")
@@ -48,8 +56,8 @@ def main():
     train_csv = "splits/train.csv"
     val_csv = "splits/val.csv"
 
-    # Medical BERT
-    text_model = "emilyalsentzer/Bio_ClinicalBERT"
+    image_model = args.image_encoder
+    text_model = args.text_encoder
 
     # Training config (safe defaults for 981 samples)
     batch_size = 16
@@ -64,6 +72,8 @@ def main():
     print("Text model:", text_model)
 
     tokenizer = AutoTokenizer.from_pretrained(text_model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
     train_ds = UCMultimodalDataset(train_csv, image_root=image_root, train=True)
     val_ds = UCMultimodalDataset(val_csv, image_root=image_root, train=False)
@@ -86,17 +96,18 @@ def main():
         collate_fn=lambda b: collate_fn(b, tokenizer),
     )
 
-    model = ClipResNetBert(
-        text_model_name=text_model,
+    model = ClipDualEncoder(
+        image_encoder_name=image_model,
+        text_encoder_name=text_model,
         embed_dim=embed_dim,
-        train_image_backbone=False,  # start frozen
-        train_text_backbone=False,   # start frozen
+        train_image_backbone=False,
+        train_text_backbone=False,
     ).to(device)
 
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
-    out_dir = Path("runs/clip_rn50_clinicalbert")
+    out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     best_val = float("inf")
