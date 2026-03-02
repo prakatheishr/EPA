@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import json
-
+import argparse
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -10,7 +10,7 @@ from tqdm import tqdm
 from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classification_report
 
 from dataset import UCMultimodalDataset
-from clip_model import ClipResNetBert, MultimodalMESHead
+from clip_model import ClipDualEncoder, MultimodalMESHead
 
 import re
 
@@ -82,8 +82,6 @@ def evaluate(foundation, head, loader, device):
         attn = batch["attention_mask"].to(device)
 
         out = foundation(images, input_ids, attn)  # ClipBatchOutputs
-        logits = head(torch.zeros_like(out.image_emb), out.text_emb)
-        logits = head(out.image_emb, torch.zeros_like(out.text_emb))
         logits = head(out.image_emb, out.text_emb)
         preds = logits.argmax(dim=-1)
 
@@ -100,6 +98,14 @@ def evaluate(foundation, head, loader, device):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--image_encoder", default="resnet50")
+    parser.add_argument("--text_encoder", default="emilyalsentzer/Bio_ClinicalBERT")
+    parser.add_argument("--foundation_ckpt", required=True)
+
+    args = parser.parse_args()
+
     csv_path = os.environ.get("UC_DATA_CSV")
     image_root = os.environ.get("UC_IMAGE_ROOT")
     if not csv_path or not image_root:
@@ -109,8 +115,9 @@ def main():
     val_csv = "splits/val.csv"
     test_csv = "splits/test.csv"
 
-    # Medical BERT
-    text_model = "emilyalsentzer/Bio_ClinicalBERT"
+    image_model = args.image_encoder
+    text_model = args.text_encoder
+    ckpt = Path(args.foundation_ckpt)
 
     # config
     batch_size = 16
@@ -126,6 +133,8 @@ def main():
     print("Text model:", text_model)
 
     tokenizer = AutoTokenizer.from_pretrained(text_model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
     train_ds = UCMultimodalDataset(train_csv, image_root=image_root, train=True)
     val_ds = UCMultimodalDataset(val_csv, image_root=image_root, train=False)
@@ -156,13 +165,13 @@ def main():
         collate_fn=lambda b: collate_fn(b, tokenizer),
     )
 
-    # Load trained CLIP foundation
-    ckpt = Path("runs/clip_rn50_clinicalbert/best.pt")
     if not ckpt.exists():
-        raise SystemExit(f"Foundation checkpoint not found: {ckpt}. Run train_model.py first.")
+        raise SystemExit(f"Foundation checkpoint not found: {ckpt}")
 
-    foundation = ClipResNetBert(
-        text_model_name=text_model,
+    
+    foundation = ClipDualEncoder(
+        image_encoder_name=image_model,
+        text_encoder_name=text_model,
         embed_dim=embed_dim,
         train_image_backbone=False,
         train_text_backbone=False,
