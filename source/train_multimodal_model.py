@@ -12,6 +12,20 @@ from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, classifi
 from dataset import UCMultimodalDataset
 from clip_model import ClipResNetBert, MultimodalMESHead
 
+import re
+
+LABEL_RE = re.compile(
+    r"(\bmes\s*[-]?\s*[0-3]\b)|(\bmayo\s*endoscopic\s*score\s*[0-3]\b)|(\bmayo\s*score\s*[0-3]\b)",
+    flags=re.IGNORECASE,
+)
+
+def clean_description(text: str) -> str:
+    # remove explicit MES/Mayo score mentions to prevent label leakage
+    text = "" if text is None else str(text)
+    text = LABEL_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
 
 def get_device(force_cpu: bool = False) -> str:
     if force_cpu:
@@ -25,7 +39,7 @@ def get_device(force_cpu: bool = False) -> str:
 def collate_fn(batch, tokenizer, max_len: int = 128):
     images = torch.stack([b["image"] for b in batch], dim=0)
     labels = torch.stack([b["label"] for b in batch], dim=0)
-    texts = [b["text"] for b in batch]
+    texts = [clean_description(b["text"]) for b in batch]
 
     tok = tokenizer(
         texts,
@@ -40,6 +54,7 @@ def collate_fn(batch, tokenizer, max_len: int = 128):
         "input_ids": tok["input_ids"],
         "attention_mask": tok["attention_mask"],
     }
+
 
 @torch.no_grad()
 def evaluate(foundation, head, loader, device):
