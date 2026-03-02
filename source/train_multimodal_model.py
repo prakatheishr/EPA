@@ -15,12 +15,25 @@ from clip_model import ClipResNetBert, MultimodalMESHead
 import re
 
 LABEL_RE = re.compile(
-    r"(\bmes\s*[-]?\s*[0-3]\b)|(\bmayo\s*endoscopic\s*score\s*[0-3]\b)|(\bmayo\s*score\s*[0-3]\b)",
-    flags=re.IGNORECASE,
+    r"""
+    # Explicit MES / Mayo patterns (all 0–3)
+    (\bmes\s*[-]?\s*[0-3]\b) |
+    (\bmayo\s*endoscopic\s*score\s*[0-3]\b) |
+    (\bmayo\s*score\s*[0-3]\b) |
+
+    # "support(s) a 0/1/2/3"
+    (\bsupports?\s+(a\s+)?[0-3]\b) |
+
+    # "consistent with 0/1/2/3"
+    (\bconsistent\s+with\s+[0-3]\b) |
+
+    # "grade 0/1/2/3" or "grade of 0/1/2/3"
+    (\bgrade(\s+of)?\s+[0-3]\b)
+    """,
+    flags=re.IGNORECASE | re.VERBOSE,
 )
 
 def clean_description(text: str) -> str:
-    # remove explicit MES/Mayo score mentions to prevent label leakage
     text = "" if text is None else str(text)
     text = LABEL_RE.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -69,6 +82,8 @@ def evaluate(foundation, head, loader, device):
         attn = batch["attention_mask"].to(device)
 
         out = foundation(images, input_ids, attn)  # ClipBatchOutputs
+        logits = head(torch.zeros_like(out.image_emb), out.text_emb)
+        logits = head(out.image_emb, torch.zeros_like(out.text_emb))
         logits = head(out.image_emb, out.text_emb)
         preds = logits.argmax(dim=-1)
 
