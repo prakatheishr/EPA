@@ -77,3 +77,27 @@ def clip_contrastive_loss(image_emb: torch.Tensor, text_emb: torch.Tensor, logit
     loss_i = F.cross_entropy(logits, targets)
     loss_t = F.cross_entropy(logits.T, targets)
     return 0.5 * (loss_i + loss_t)
+
+class MultimodalMESHead(nn.Module):
+    # fully multimodal MES classifier that uses image and text embeddings and predicts MES
+
+    def __init__(self, embed_dim: int = 256, hidden_dim: int = 256, num_classes: int = 4):
+        super().__init__()
+
+        # concatenation of image + text embeddings into 2 * embed_dim
+        self.classifier = nn.Sequential(
+            nn.Linear(embed_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+    def forward(self, image_emb: torch.Tensor, text_emb: torch.Tensor) -> torch.Tensor:
+        """
+        image_emb: (B, D)
+        text_emb:  (B, D)
+        returns:   (B, 4) logits
+        """
+        fused = torch.cat([image_emb, text_emb], dim=-1)
+        logits = self.classifier(fused)
+        return logits
