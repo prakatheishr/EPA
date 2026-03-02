@@ -41,8 +41,35 @@ def collate_fn(batch, tokenizer, max_len: int = 128):
         "attention_mask": tok["attention_mask"],
     }
 
+@torch.no_grad()
+def evaluate(foundation, head, loader, device):
+    foundation.eval()
+    head.eval()
+
+    y_true, y_pred = [], []
+    for batch in loader:
+        images = batch["images"].to(device)
+        labels = batch["labels"].to(device)
+        input_ids = batch["input_ids"].to(device)
+        attn = batch["attention_mask"].to(device)
+
+        out = foundation(images, input_ids, attn)  # ClipBatchOutputs
+        logits = head(out.image_emb, out.text_emb)
+        preds = logits.argmax(dim=-1)
+
+        y_true.extend(labels.cpu().tolist())
+        y_pred.extend(preds.cpu().tolist())
+
+    acc = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, average="macro")
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1, 2, 3])
+    report = classification_report(y_true, y_pred, digits=4)
+    return acc, f1, cm, report
+
+
+
+
 def main():
-    # Env vars (same pattern as train_model.py)
     csv_path = os.environ.get("UC_DATA_CSV")
     image_root = os.environ.get("UC_IMAGE_ROOT")
     if not csv_path or not image_root:
@@ -55,7 +82,7 @@ def main():
     # Medical BERT
     text_model = "emilyalsentzer/Bio_ClinicalBERT"
 
-    # Config
+    # config
     batch_size = 16
     epochs = 30
     lr = 1e-3
@@ -124,6 +151,59 @@ def main():
 
     out_dir = Path("runs/mes_multimodal")
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    best_val_f1 = -1.0
+    for epoch in range(1, epochs + 1):
+        head.train()
+        total = 0.0
+        n = 0
+
+        for batch in tqdm(train_loader, desc=f"Train epoch {epoch}"):
+            images = batch["images"].to(device)
+            labels = batch["labels"].to(device)
+            input_ids = batch["input_ids"].to(device)
+            attn = batch["attention_mask"].to(device)
+
+            with torch.no_grad():
+                out = foundation(images, input_ids, attn)
+
+            logits = head(out.image_emb, out.text_emb)
+            loss = loss_fn(logits, labels)
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            total += float(loss.item())
+            n += 1
+
+        train_loss = total / max(n, 1)
+
+        val_acc, val_f1, val_cm, _ = evaluate(foundation, head, val_loader, device)
+        print(f"Epoch {epoch}: train_loss={train_loss:.4f}  val_acc={val_acc:.4f}  val_macro_f1={val_f1:.4f}")
+
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            torch.save(head.state_dict(), out_dir / "best_head.pt")
+            (out_dir / "metrics.json").write_text(
+                json.dumps({"best_val_macro_f1": best_val_f1}, indent=2)
+            )
+            print("Saved new best head:", out_dir / "best_head.pt")
+
+    head.load_state_dict(torch.load(out_dir / "best_head.pt", map_location=device))
+    test_acc, test_f1, test_cm, test_report = evaluate(foundation, head, test_loader, device)
+
+    print("\nMultimodal MES classifier (image + paired text)")
+    print(f"Test Accuracy: {test_acc:.4f}")
+    print(f"Test Macro F1:  {test_f1:.4f}")
+    print("Confusion:\n", test_cm)
+    print(test_report)
+
+    (out_dir / "test_results.json").write_text(
+        json.dumps({"test_accuracy": test_acc, "test_macro_f1": test_f1, "confusion_matrix": test_cm.tolist()}, indent=2)
+    )
+
+
 
 
 if __name__ == "__main__":
