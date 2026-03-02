@@ -114,26 +114,37 @@ def build_text_backbone(name: str, train_backbone: bool):
         return GPTBackbone(name, train_backbone)
     else:
         return BERTBackbone(name, train_backbone)
+    
 
-class ClipResNetBert(nn.Module):
+# -------------- CLIP Dual-Encoder --------------
+# encoder fuction that allows us to alter which text and image encoder we use when testing
+class ClipDualEncoder(nn.Module):
     def __init__(
         self,
-        text_model_name: str,
+        image_encoder_name: str,
+        text_encoder_name: str,
         embed_dim: int = 256,
         train_image_backbone: bool = False,
         train_text_backbone: bool = False,
     ):
         super().__init__()
-        self.image_encoder = ResNet50Backbone(train_backbone=train_image_backbone)
-        self.text_encoder = BERTBackbone(model_name=text_model_name, train_backbone=train_text_backbone)
+
+        self.image_encoder = build_image_backbone(
+            image_encoder_name,
+            train_image_backbone
+        )
+
+        self.text_encoder = build_text_backbone(
+            text_encoder_name,
+            train_text_backbone
+        )
 
         self.image_proj = nn.Linear(self.image_encoder.out_dim, embed_dim)
         self.text_proj = nn.Linear(self.text_encoder.out_dim, embed_dim)
 
-        # CLIP temperature parameter (learned)
-        self.logit_scale = nn.Parameter(torch.tensor(2.6592))  # ~log(1/0.07)
+        self.logit_scale = nn.Parameter(torch.tensor(2.6592))
 
-    def forward(self, images: torch.Tensor, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> ClipBatchOutputs:
+    def forward(self, images, input_ids, attention_mask):
         img_feat = self.image_encoder(images)
         txt_feat = self.text_encoder(input_ids, attention_mask)
 
@@ -145,6 +156,8 @@ class ClipResNetBert(nn.Module):
             text_emb=txt_emb,
             logit_scale=self.logit_scale.exp(),
         )
+
+
 
 # ------------------ Contrastive Loss ----------------------
 def clip_contrastive_loss(image_emb: torch.Tensor, text_emb: torch.Tensor, logit_scale: torch.Tensor) -> torch.Tensor:
