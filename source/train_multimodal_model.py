@@ -82,8 +82,6 @@ def evaluate(foundation, head, loader, device):
         attn = batch["attention_mask"].to(device)
 
         out = foundation(images, input_ids, attn)  # ClipBatchOutputs
-        logits = head(torch.zeros_like(out.image_emb), out.text_emb)
-        logits = head(out.image_emb, torch.zeros_like(out.text_emb))
         logits = head(out.image_emb, out.text_emb)
         preds = logits.argmax(dim=-1)
 
@@ -170,7 +168,6 @@ def main():
     if not ckpt.exists():
         raise SystemExit(f"Foundation checkpoint not found: {ckpt}")
 
-    foundation.load_state_dict(torch.load(ckpt, map_location=device))
     
     foundation = ClipDualEncoder(
         image_encoder_name=image_model,
