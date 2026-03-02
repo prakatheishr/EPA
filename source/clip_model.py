@@ -71,22 +71,49 @@ def build_image_backbone(name: str, train_backbone: bool):
         raise ValueError(f"Unsupported image encoder: {name}")
     
 
-    
+
 
 # ------------------ Text Backbones --------------------
 class BERTBackbone(nn.Module):
     def __init__(self, model_name: str, train_backbone: bool):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name)
-        self.out_dim = self.bert.config.hidden_size
+        self.model = AutoModel.from_pretrained(model_name)
+        self.out_dim = self.model.config.hidden_size
         if not train_backbone:
-            for p in self.bert.parameters():
+            for p in self.model.parameters():
                 p.requires_grad = False
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        out = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+    def forward(self, input_ids, attention_mask):
+        out = self.model(input_ids=input_ids, attention_mask=attention_mask)
         cls = out.last_hidden_state[:, 0, :]  # [CLS]
         return cls
+    
+
+class GPTBackbone(nn.Module):
+    # decoder-only GPT used as encoder with mean-pool hidden states
+
+    def __init__(self, model_name: str, train_backbone: bool):
+        super().__init__()
+        self.model = AutoModel.from_pretrained(model_name)
+        self.out_dim = self.model.config.hidden_size
+
+        if not train_backbone:
+            for p in self.model.parameters():
+                p.requires_grad = False
+
+    def forward(self, input_ids, attention_mask):
+        out = self.model(input_ids=input_ids, attention_mask=attention_mask)
+        hidden = out.last_hidden_state
+        return hidden.mean(dim=1)  # mean pooling
+
+
+def build_text_backbone(name: str, train_backbone: bool):
+    name_lower = name.lower()
+
+    if "gpt" in name_lower:
+        return GPTBackbone(name, train_backbone)
+    else:
+        return BERTBackbone(name, train_backbone)
 
 class ClipResNetBert(nn.Module):
     def __init__(
