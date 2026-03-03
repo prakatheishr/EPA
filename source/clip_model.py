@@ -193,3 +193,11 @@ class MultimodalMESHead(nn.Module):
         fused = torch.cat([image_emb, text_emb], dim=-1)
         logits = self.classifier(fused)
         return logits
+    
+
+# -------------- Caption Generation ---------------
+@torch.no_grad()
+def encode_image(self, images: torch.Tensor) -> torch.Tensor:
+    feat = self.image_encoder(images)
+    emb = F.normalize(self.image_proj(feat), dim=-1)
+    return emb
