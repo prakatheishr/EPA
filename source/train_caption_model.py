@@ -53,6 +53,59 @@ def collate_caption(batch, tokenizer, max_len: int = 96):
         "labels": labels,
     }
 
+@torch.no_grad()
+def eval_loss(foundation, captioner, loader, device):
+    foundation.eval()
+    captioner.eval()
+
+    total = 0.0
+    n = 0
+    for batch in loader:
+        images = batch["images"].to(device)
+        input_ids = batch["input_ids"].to(device)
+        attn = batch["attention_mask"].to(device)
+        labels = batch["labels"].to(device)
+
+        # Get foundation embeddings
+        out = foundation(images, input_ids=None, attention_mask=None, text_only=False)  # depends on your ClipDualEncoder API
+        # If your ClipDualEncoder requires text inputs, we do NOT want that here.
+        # We only need image_emb (and optionally text_emb if you want to condition on both).
+        # We'll use image_emb only for captioning to avoid leaking text target back in.
+
+        # --- IMPORTANT ---
+        # If your ClipDualEncoder forward signature is (images, input_ids, attention_mask),
+        # then you should create a separate method in ClipDualEncoder called encode_image().
+        # I include a safe fallback below assuming foundation has encode_image().
+        if hasattr(foundation, "encode_image"):
+            img_emb = foundation.encode_image(images)  # (B, D)
+        else:
+            raise RuntimeError("ClipDualEncoder must expose encode_image(images) for caption training.")
+
+        fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 2D) if you want image-only conditioning
+
+        out_cap = captioner(fused=fused, input_ids=input_ids, attention_mask=attn, labels=labels)
+        total += float(out_cap.loss.item())
+        n += 1
+
+    return total / max(n, 1)
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--image_encoder", default="resnet50")
+    p.add_argument("--text_encoder", default="emilyalsentzer/Bio_ClinicalBERT")
+    p.add_argument("--foundation_ckpt", required=True)
+    p.add_argument("--gpt_name", default="gpt2")
+    p.add_argument("--out_dir", default="runs/captioner")
+    p.add_argument("--prefix_len", type=int, default=10)
+
+    p.add_argument("--epochs", type=int, default=10)
+    p.add_argument("--batch_size", type=int, default=8)
+    p.add_argument("--lr", type=float, default=2e-4)
+    p.add_argument("--weight_decay", type=float, default=1e-4)
+    p.add_argument("--max_len", type=int, default=96)
+    p.add_argument("--force_cpu", action="store_true")
+    return p.parse_args()
 
 
 
@@ -78,7 +131,95 @@ def main():
     train_ds = UCMultimodalDataset("splits/train.csv", image_root=image_root, train=True)
     val_ds = UCMultimodalDataset("splits/val.csv", image_root=image_root, train=False)
 
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,
+        drop_last=False,
+        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len),
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=0,
+        drop_last=False,
+        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len),
+    )
 
+    # Load foundation (frozen)
+    ckpt = Path(args.foundation_ckpt)
+    if not ckpt.exists():
+        raise SystemExit(f"Foundation checkpoint not found: {ckpt}")
+
+    foundation = ClipDualEncoder(
+        image_encoder_name=args.image_encoder,
+        text_encoder_name=args.text_encoder,
+        embed_dim=256,
+        train_image_backbone=False,
+        train_text_backbone=False,
+    ).to(device)
+    foundation.load_state_dict(torch.load(ckpt, map_location=device))
+    foundation.eval()
+    for p in foundation.parameters():
+        p.requires_grad = False
+
+    # Captioner: fused_dim = 512 if we concatenate (img_emb + txt_emb) each 256
+    captioner = PrefixCaptioner(
+        gpt_name=args.gpt_name,
+        fused_dim=512,
+        prefix_len=args.prefix_len,
+        dropout=0.1,
+        freeze_gpt=False,  # set True if you want only prefix to learn
+    ).to(device)
+
+    opt = torch.optim.AdamW(captioner.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    best_val = float("inf")
+    for epoch in range(1, args.epochs + 1):
+        captioner.train()
+        total = 0.0
+        n = 0
+
+        for batch in tqdm(train_loader, desc=f"Train caption epoch {epoch}"):
+            images = batch["images"].to(device)
+            input_ids = batch["input_ids"].to(device)
+            attn = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
+
+            # image-only conditioning (recommended to avoid leaking target text back in)
+            if hasattr(foundation, "encode_image"):
+                img_emb = foundation.encode_image(images)  # (B, 256)
+            else:
+                raise RuntimeError("ClipDualEncoder must expose encode_image(images) for caption training.")
+
+            fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 512)
+
+            out_cap = captioner(fused=fused, input_ids=input_ids, attention_mask=attn, labels=labels)
+            loss = out_cap.loss
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+            total += float(loss.item())
+            n += 1
+
+        train_loss = total / max(n, 1)
+        val_loss = eval_loss(foundation, captioner, val_loader, device)
+        print(f"Epoch {epoch}: train_loss={train_loss:.4f}  val_loss={val_loss:.4f}")
+
+        if val_loss < best_val:
+            best_val = val_loss
+            torch.save(captioner.state_dict(), out_dir / "best_captioner.pt")
+            (out_dir / "metrics.json").write_text(json.dumps({"best_val_loss": best_val}, indent=2))
+            print("Saved new best captioner:", out_dir / "best_captioner.pt")
+
+    print("Done. Best val loss:", best_val)
 
 
 if __name__ == "__main__":
