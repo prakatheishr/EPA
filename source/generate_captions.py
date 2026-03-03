@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-
+import re
 import torch
 from PIL import Image
 from torchvision import transforms
@@ -160,6 +160,10 @@ def main():
     )
 
     text = tokenizer.decode(gen[0], skip_special_tokens=True).strip()
+    
+    m = re.search(r"(MES-[0-3]\.)", text)
+    if m:
+        text = text[: m.end()].strip()
 
     # If the decoded string includes the prompt, strip it off
     if args.prompt and text.lower().startswith(args.prompt.strip().lower()):

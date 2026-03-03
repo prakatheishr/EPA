@@ -24,34 +24,46 @@ def get_device(force_cpu: bool = False) -> str:
     return "cpu"
 
 
-def collate_caption(batch, tokenizer, max_len: int = 96):
-    # Builds caption targets from dataset description (cleaned) + forced MES suffix - Returns: images, input_ids, attention_mask, labels, mes_nums
-
+def collate_caption(batch, tokenizer, max_len: int = 96, prompt: str = "Findings: "):
     images = torch.stack([b["image"] for b in batch], dim=0)
 
-    captions = []
+    targets = []
     for b in batch:
         body = clean_caption_body(b["text"])
         mes_num = int(b["label"].item()) if hasattr(b["label"], "item") else int(b["label"])
-        captions.append(format_caption_with_mes(body, mes_num))
+        targets.append(format_caption_with_mes(body, mes_num))
+
+    # Full sequence fed to GPT = prompt + target
+    full_texts = [prompt + t for t in targets]
+
+    # Append EOS so model learns to stop
+    full_texts = [t + tokenizer.eos_token for t in full_texts]
 
     tok = tokenizer(
-        captions,
+        full_texts,
         padding=True,
         truncation=True,
         max_length=max_len,
         return_tensors="pt",
     )
 
-    # in GPT-2 language modelling: labels are input_ids
-    labels = tok["input_ids"].clone()
+    input_ids = tok["input_ids"]
+    attention_mask = tok["attention_mask"]
+
+    labels = input_ids.clone()
+    labels[attention_mask == 0] = -100
+
+    prompt_ids = tokenizer(prompt, add_special_tokens=False, return_tensors="pt").input_ids[0]
+    prompt_len = int(prompt_ids.numel())
+    labels[:, :prompt_len] = -100
 
     return {
         "images": images,
-        "input_ids": tok["input_ids"],
-        "attention_mask": tok["attention_mask"],
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
         "labels": labels,
     }
+
 
 @torch.no_grad()
 def eval_loss(foundation, captioner, loader, device):
@@ -66,13 +78,8 @@ def eval_loss(foundation, captioner, loader, device):
         attn = batch["attention_mask"].to(device)
         labels = batch["labels"].to(device)
 
-        # Image-only conditioning (no text leakage)
-        if hasattr(foundation, "encode_image"):
-            img_emb = foundation.encode_image(images)  # (B, D)
-        else:
-            raise RuntimeError("ClipDualEncoder must expose encode_image(images) for caption training.")
-
-        fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 2D)
+        img_emb = foundation.encode_image(images)  # (B, 256)
+        fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 512)
 
         out_cap = captioner(fused=fused, input_ids=input_ids, attention_mask=attn, labels=labels)
         total += float(out_cap.loss.item())
@@ -86,18 +93,30 @@ def parse_args():
     p.add_argument("--image_encoder", default="resnet50")
     p.add_argument("--text_encoder", default="emilyalsentzer/Bio_ClinicalBERT")
     p.add_argument("--foundation_ckpt", required=True)
+
     p.add_argument("--gpt_name", default="gpt2")
     p.add_argument("--out_dir", default="runs/captioner")
     p.add_argument("--prefix_len", type=int, default=10)
 
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--batch_size", type=int, default=8)
+
+    # prefix LR
     p.add_argument("--lr", type=float, default=2e-4)
+    # GPT LR (used only after unfreeze)
+    p.add_argument("--gpt_lr", type=float, default=2e-5)
+
     p.add_argument("--weight_decay", type=float, default=1e-4)
     p.add_argument("--max_len", type=int, default=96)
     p.add_argument("--force_cpu", action="store_true")
-    return p.parse_args()
 
+    # schedule
+    p.add_argument("--freeze_gpt_epochs", type=int, default=5)
+
+    # stability
+    p.add_argument("--grad_clip", type=float, default=1.0)
+
+    return p.parse_args()
 
 
 def main():
@@ -118,7 +137,6 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # datasets - use description as target caption text
     train_ds = UCMultimodalDataset("splits/train.csv", image_root=image_root, train=True)
     val_ds = UCMultimodalDataset("splits/val.csv", image_root=image_root, train=False)
 
@@ -128,7 +146,7 @@ def main():
         shuffle=True,
         num_workers=0,
         drop_last=False,
-        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len),
+        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len, prompt="Findings: "),
     )
     val_loader = DataLoader(
         val_ds,
@@ -136,7 +154,7 @@ def main():
         shuffle=False,
         num_workers=0,
         drop_last=False,
-        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len),
+        collate_fn=lambda b: collate_caption(b, tokenizer, max_len=args.max_len, prompt="Findings: "),
     )
 
     # Load foundation (frozen)
@@ -156,45 +174,67 @@ def main():
     for p in foundation.parameters():
         p.requires_grad = False
 
-    # Captioner: fused_dim = 512 if we concatenate (img_emb + txt_emb) each 256
+    # Captioner
     captioner = PrefixCaptioner(
         gpt_name=args.gpt_name,
         fused_dim=512,
         prefix_len=args.prefix_len,
         dropout=0.1,
-        freeze_gpt=True,  
+        freeze_gpt=False,  # we will control requires_grad manually
     ).to(device)
 
-    opt = torch.optim.AdamW(captioner.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # Make sure GPT knows pad token
+    captioner.gpt.config.pad_token_id = tokenizer.eos_token_id
+
+    # Split params into prefix vs GPT for different LRs
+    prefix_params, gpt_params = [], []
+    for name, p in captioner.named_parameters():
+        if name.startswith("gpt."):
+            gpt_params.append(p)
+        else:
+            prefix_params.append(p)
+
+    opt = torch.optim.AdamW(
+        [
+            {"params": prefix_params, "lr": args.lr},
+            {"params": gpt_params, "lr": args.gpt_lr},
+        ],
+        weight_decay=args.weight_decay,
+    )
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     best_val = float("inf")
+
     for epoch in range(1, args.epochs + 1):
+        # --- freeze/unfreeze schedule ---
+        freeze_now = epoch <= args.freeze_gpt_epochs
+        for p in captioner.gpt.parameters():
+            p.requires_grad = not freeze_now
+
         captioner.train()
         total = 0.0
         n = 0
 
-        for batch in tqdm(train_loader, desc=f"Train caption epoch {epoch}"):
+        for batch in tqdm(train_loader, desc=f"Train caption epoch {epoch} (freeze_gpt={freeze_now})"):
             images = batch["images"].to(device)
             input_ids = batch["input_ids"].to(device)
             attn = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            # image-only conditioning (recommended to avoid leaking target text back in)
-            if hasattr(foundation, "encode_image"):
-                img_emb = foundation.encode_image(images)  # (B, 256)
-            else:
-                raise RuntimeError("ClipDualEncoder must expose encode_image(images) for caption training.")
-
+            img_emb = foundation.encode_image(images)  # (B, 256)
             fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 512)
 
             out_cap = captioner(fused=fused, input_ids=input_ids, attention_mask=attn, labels=labels)
             loss = out_cap.loss
 
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=True)
             loss.backward()
+
+            # stability
+            torch.nn.utils.clip_grad_norm_(captioner.parameters(), args.grad_clip)
+
             opt.step()
 
             total += float(loss.item())
