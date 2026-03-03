@@ -66,22 +66,13 @@ def eval_loss(foundation, captioner, loader, device):
         attn = batch["attention_mask"].to(device)
         labels = batch["labels"].to(device)
 
-        # Get foundation embeddings
-        out = foundation(images, input_ids=None, attention_mask=None, text_only=False)  # depends on your ClipDualEncoder API
-        # If your ClipDualEncoder requires text inputs, we do NOT want that here.
-        # We only need image_emb (and optionally text_emb if you want to condition on both).
-        # We'll use image_emb only for captioning to avoid leaking text target back in.
-
-        # --- IMPORTANT ---
-        # If your ClipDualEncoder forward signature is (images, input_ids, attention_mask),
-        # then you should create a separate method in ClipDualEncoder called encode_image().
-        # I include a safe fallback below assuming foundation has encode_image().
+        # Image-only conditioning (no text leakage)
         if hasattr(foundation, "encode_image"):
             img_emb = foundation.encode_image(images)  # (B, D)
         else:
             raise RuntimeError("ClipDualEncoder must expose encode_image(images) for caption training.")
 
-        fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 2D) if you want image-only conditioning
+        fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B, 2D)
 
         out_cap = captioner(fused=fused, input_ids=input_ids, attention_mask=attn, labels=labels)
         total += float(out_cap.loss.item())
@@ -171,7 +162,7 @@ def main():
         fused_dim=512,
         prefix_len=args.prefix_len,
         dropout=0.1,
-        freeze_gpt=False,  # set True if you want only prefix to learn
+        freeze_gpt=True,  
     ).to(device)
 
     opt = torch.optim.AdamW(captioner.parameters(), lr=args.lr, weight_decay=args.weight_decay)

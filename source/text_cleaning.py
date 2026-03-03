@@ -33,3 +33,31 @@ def format_caption_with_mes(clean_body: str, mes_num: int) -> str:
     clean_body = (clean_body or "").strip()
     suffix = f" these findings support a mes{int(mes_num)}"
     return (clean_body + suffix).strip().lower()
+
+# remove boilerplate phrases that appear across many reports
+BOILERPLATE_RE = re.compile(
+    r"""
+    (these\s+findings\s+support(\s+an?)?)|
+    (findings\s+support(\s+an?)?)|
+    (overall\s+findings\s+are\s+consistent\s+with)|
+    (consistent\s+with)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# remove MES mentions in any format (mes2, mes-2, mes 2, mayo endoscopic score 2 etc.)
+MES_RE = re.compile(
+    r"""
+    (\bmes\s*[-]?\s*[0-3]\b)|
+    (\bmayo\s*endoscopic\s*score\s*[0-3]\b)|
+    (\bmayo\s*score\s*[0-3]\b)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def clean_caption_body(text: str) -> str:
+    text = "" if text is None else str(text).strip()
+    text = MES_RE.sub("", text)
+    text = BOILERPLATE_RE.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip(" .,-;:")
+    return text
