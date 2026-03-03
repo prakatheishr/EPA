@@ -143,6 +143,22 @@ class ClipDualEncoder(nn.Module):
         self.text_proj = nn.Linear(self.text_encoder.out_dim, embed_dim)
 
         self.logit_scale = nn.Parameter(torch.tensor(2.6592))
+    
+    @torch.no_grad()
+    def encode_image(self, images: torch.Tensor) -> torch.Tensor:
+        # returns normalised image embedding: (B, D)
+        self.eval()
+        img_feat = self.image_encoder(images)              # (B, img_dim)
+        img_emb = F.normalize(self.image_proj(img_feat), dim=-1)  # (B, D)
+        return img_emb
+
+    @torch.no_grad()
+    def encode_text(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        # returns normalised text embedding: (B, D)
+        self.eval()
+        txt_feat = self.text_encoder(input_ids, attention_mask)   # (B, txt_dim)
+        txt_emb = F.normalize(self.text_proj(txt_feat), dim=-1)   # (B, D)
+        return txt_emb
 
     def forward(self, images, input_ids, attention_mask):
         img_feat = self.image_encoder(images)
@@ -193,11 +209,4 @@ class MultimodalMESHead(nn.Module):
         fused = torch.cat([image_emb, text_emb], dim=-1)
         logits = self.classifier(fused)
         return logits
-    
-
-# -------------- Caption Generation ---------------
-@torch.no_grad()
-def encode_image(self, images: torch.Tensor) -> torch.Tensor:
-    feat = self.image_encoder(images)
-    emb = F.normalize(self.image_proj(feat), dim=-1)
-    return emb
+ 
