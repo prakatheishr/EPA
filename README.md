@@ -185,12 +185,17 @@ Metrics reported: BLEU, ROUGE-1, ROUGE-2, ROUGE-L
 
 ## Results
 
-### Rough Classification Performance Across Encoders
+### Classification Performance
 
-| Metric   | Score       |
-|----------|-------------|
-| Accuracy | ~0.89–0.91  |
-| Macro F1 | ~0.89–0.91  |
+| Encoder Combination         | Accuracy | Macro Avg F1 | Macro Avg Recall | Macro Avg Precision |
+|-----------------------------|----------|--------------|------------------|---------------------|
+| ResNet50 + BERT-Large        | 0.8716   | 0.8795       | 0.8682           | 0.8972              |
+| ResNet50 + GPT-2             | 0.8986   | 0.8934       | 0.8713           | 0.9260              |
+| ResNet50 + ClinicalBERT      | 0.8919   | 0.8995       | 0.8937           | 0.9059              |
+| ViT-B/16 + BERT-Large        | 0.8446   | 0.8615       | 0.8487           | 0.8776              |
+| ViT-B/16 + GPT-2             | 0.9257   | **0.9279**   | **0.9157**       | 0.9469              |
+| **ViT-B/16 + ClinicalBERT** | **0.9324** | 0.9275     | 0.9016           | **0.9655**          |
+
 
 **Key observations:**
 - Strong performance on clear classes (MES-0, MES-2)
@@ -198,12 +203,12 @@ Metrics reported: BLEU, ROUGE-1, ROUGE-2, ROUGE-L
 
 ### Captioning Performance
 
-| Metric  | Score |
-|---------|-------|
-| BLEU    | ~29.6 |
-| ROUGE-1 | ~0.59 |
-| ROUGE-2 | ~0.46 |
-| ROUGE-L | ~0.57 |
+| Metric  | Score  |
+|---------|--------|
+| BLEU    | 29.64  |
+| ROUGE-1 | 0.5945 |
+| ROUGE-2 | 0.4629 |
+| ROUGE-L | 0.5713 |
 
 **Example output:**
 > *adequate vascular pattern normal mucosa no visible erosions and superficial ulcers mild bleeding is present MES-2.*
