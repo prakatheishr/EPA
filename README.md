@@ -2,11 +2,11 @@
 
 ## Overview
 
-This project develops a **multimodal vision–language system** for analysing colonoscopy images in ulcerative colitis (UC). The system integrates image and text data to:
+This project develops a multimodal vision–language system for analysing colonoscopy images in ulcerative colitis (UC). The system integrates image and text data to:
 
-- Predict **Mayo Endoscopic Score (MES)** (0–3)
-- Learn **joint multimodal representations** using a CLIP-style dual encoder
-- Generate **clinically structured captions** explaining findings and severity
+- Predict Mayo Endoscopic Score (MES) (0–3)
+- Learn joint multimodal representations using a CLIP-style dual encoder
+- Generate clinically structured captions explaining findings and severity
 
 The pipeline progresses through three stages:
 
@@ -20,22 +20,22 @@ The pipeline progresses through three stages:
 
 Traditional medical image classification models provide predictions but lack interpretability. This project aims to:
 
-- Evaluate whether **vision–language models** can capture clinically meaningful features
-- Compare different **encoder architectures**
-- Extend classification into **explainable caption generation**
+- Evaluate whether vision–language models can capture clinically meaningful features
+- Compare different encoder architectures
+- Extend classification into explainable caption generation
 
 ---
 
 ## Features
 
-- CLIP-style **dual encoder architecture**
+- CLIP-style dual encoder architecture
 - Comparison of multiple encoders:
   - Image: ResNet50, ViT-B/16
   - Text: Bio_ClinicalBERT, BERT-large, GPT-2
-- **Zero-shot classification**
-- **Linear probe evaluation**
-- **Multimodal classifier (fusion-based)**
-- **Prefix-based caption generation (GPT-2)**
+- Zero-shot classification
+- Linear probe evaluation
+- Multimodal classifier (fusion-based)
+- Prefix-based caption generation (GPT-2)
 - Full evaluation pipeline:
   - Classification: Accuracy, Macro F1
   - Captioning: BLEU, ROUGE
@@ -90,7 +90,7 @@ The dataset consists of:
 
 ### Preprocessing
 
-To prevent **label leakage**, text was cleaned to remove explicit severity indicators such as `"MES-2"`, `"supports a 3"`, and `"grade 1"`. This ensures the model learns **true visual-text relationships**.
+To prevent label leakage, text was cleaned to remove explicit severity indicators such as `"MES-2"`, `"supports a 3"`, and `"grade 1"`. This ensures the model learns true visual-text relationships.
 
 ---
 
