@@ -180,7 +180,7 @@ def main():
         fused_dim=512,
         prefix_len=args.prefix_len,
         dropout=0.1,
-        freeze_gpt=False,  # we will control requires_grad manually
+        freeze_gpt=False,  
     ).to(device)
 
     # Make sure GPT knows pad token
@@ -194,11 +194,7 @@ def main():
         else:
             prefix_params.append(p)
 
-    opt = torch.optim.AdamW(
-        [
-            {"params": prefix_params, "lr": args.lr},
-            {"params": gpt_params, "lr": args.gpt_lr},
-        ],
+    opt = torch.optim.AdamW([{"params": prefix_params, "lr": args.lr}, {"params": gpt_params, "lr": args.gpt_lr},],
         weight_decay=args.weight_decay,
     )
 

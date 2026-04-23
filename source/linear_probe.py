@@ -27,6 +27,7 @@ def get_device():
     return "cpu"
 
 def preprocess():
+    # Match the image preprocessing expected by the pretrained ResNet encoder
     return transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -35,13 +36,18 @@ def preprocess():
 
 @torch.no_grad()
 def extract_image_embeddings(model, device, image_root: Path, df: pd.DataFrame):
+    # Extract frozen image embeddings from the trained dual encoder.
     pre = preprocess()
     X = []
     y = []
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Extract image emb"):
         img_path = image_root / str(row["img_url"])
         img = pre(Image.open(img_path).convert("RGB")).unsqueeze(0).to(device)
+
+        # Use only the image branch of the trained multimodal model
         feat = model.image_encoder(img)
+
+        # Project into the shared embedding space learned during contrastive training
         emb = F.normalize(model.image_proj(feat), dim=-1).squeeze(0).cpu()  # (D,)
         X.append(emb)
         y.append(MES_MAP[str(row["mes_scoring_0_3"])])
@@ -63,7 +69,7 @@ def main():
     model.load_state_dict(torch.load(ckpt, map_location=device))
     model.eval()
 
-    # We don't use tokenizer here, but model init expects it in the module
+    # Tokenizer is loaded to keep the text side consistent with the saved model setup
     _ = AutoTokenizer.from_pretrained(text_model)
 
     train_df = pd.read_csv("splits/train.csv")
@@ -103,6 +109,7 @@ def main():
             total += float(loss.item())
             n += 1
 
+        # Report a few checkpoints to track how well the frozen embeddings support classification
         if epoch in {1, 5, 10, 25, 50}:
             clf.eval()
             with torch.no_grad():

@@ -15,7 +15,6 @@ def resolve_image_path(image_root: Path, img_url: str) -> Path | None:
     if p.exists():
         return p
 
-    # Try extension swaps only if it looks like an image we can swap
     name_lower = p.name.lower()
     for s in EXTS:
         if name_lower.endswith(s):

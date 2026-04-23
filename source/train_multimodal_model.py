@@ -81,7 +81,8 @@ def evaluate(foundation, head, loader, device):
         input_ids = batch["input_ids"].to(device)
         attn = batch["attention_mask"].to(device)
 
-        out = foundation(images, input_ids, attn)  # ClipBatchOutputs
+        # ClipBatchOutputs
+        out = foundation(images, input_ids, attn)  
         logits = head(out.image_emb, out.text_emb)
         preds = logits.argmax(dim=-1)
 

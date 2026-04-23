@@ -50,6 +50,7 @@ class UCMultimodalDataset(Dataset):
         image = Image.open(img_path).convert("RGB")
         image = self.transform(image)
 
+        # Keep the clinical description as raw text for tokenisation later in the pipeline
         text = "" if pd.isna(row["description"]) else str(row["description"])
         label = torch.tensor(MES_MAP[str(row["mes_scoring_0_3"])], dtype=torch.long)
 

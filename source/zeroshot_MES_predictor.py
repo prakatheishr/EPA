@@ -53,11 +53,11 @@ def encode_prompt_prototypes(model, tokenizer, device):
 
         # text backbone + projection
         txt_feat = model.text_encoder(input_ids, attn)
-        txt_emb = F.normalize(model.text_proj(txt_feat), dim=-1)  # (k, D)
-        proto = F.normalize(txt_emb.mean(dim=0, keepdim=True), dim=-1)  # (1, D)
+        txt_emb = F.normalize(model.text_proj(txt_feat), dim=-1)  
+        proto = F.normalize(txt_emb.mean(dim=0, keepdim=True), dim=-1)  
         class_embs.append(proto)
 
-    class_embs = torch.cat(class_embs, dim=0)  # (4, D)
+    class_embs = torch.cat(class_embs, dim=0)  
     class_embs = F.normalize(class_embs, dim=-1)
     return class_embs
 
@@ -72,6 +72,7 @@ def main():
     if not ckpt.exists():
         raise SystemExit(f"Checkpoint not found: {ckpt}. Train first.")
 
+    # Load trained dual encoder (image + text encoders aligned via contrastive learning)
     model = ClipResNetBert(text_model_name=text_model, embed_dim=256).to(device)
     model.load_state_dict(torch.load(ckpt, map_location=device))
     model.eval()
@@ -79,7 +80,8 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(text_model)
     preprocess = image_preprocess()
 
-    class_embs = encode_prompt_prototypes(model, tokenizer, device)  # (4, D)
+    # Precompute class embeddings from prompt descriptions
+    class_embs = encode_prompt_prototypes(model, tokenizer, device)  
 
     df = pd.read_csv(test_csv)
 
@@ -91,9 +93,12 @@ def main():
         img = preprocess(Image.open(img_path).convert("RGB")).unsqueeze(0).to(device)
 
         with torch.no_grad():
+            # Encode image into shared embedding space
             img_feat = model.image_encoder(img)
-            img_emb = F.normalize(model.image_proj(img_feat), dim=-1)  # (1, D)
-            sims = (img_emb @ class_embs.T).squeeze(0)                # (4,)
+            img_emb = F.normalize(model.image_proj(img_feat), dim=-1)  
+            
+            # Compute cosine similarity with each class prototype
+            sims = (img_emb @ class_embs.T).squeeze(0)                
             pred = int(torch.argmax(sims).item())
 
         y_true.append(MES_MAP[str(row["mes_scoring_0_3"])])

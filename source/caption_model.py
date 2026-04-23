@@ -1,4 +1,3 @@
-# source/caption_model.py
 from dataclasses import dataclass
 from typing import Optional
 
@@ -32,8 +31,7 @@ class PrefixCaptioner(nn.Module):
         self.gpt = AutoModelForCausalLM.from_pretrained(gpt_name)
         gpt_dim = int(self.gpt.config.n_embd)  # GPT-2 base = 768
 
-        # --- THIS matches your checkpoint naming + shapes ---
-        # fused_dim (512) -> gpt_dim (768) -> prefix_len*gpt_dim (e.g., 10*768=7680)
+        # Map fused multimodal features into a sequence of GPT prefix tokens
         self.prefix_mlp = nn.Sequential(
             nn.Linear(fused_dim, gpt_dim),
             nn.Tanh(),
@@ -53,7 +51,7 @@ class PrefixCaptioner(nn.Module):
         B = fused.size(0)
         gpt_dim = int(self.gpt.config.n_embd)
 
-        prefix = self.prefix_mlp(fused)                 # (B, prefix_len*gpt_dim)
+        prefix = self.prefix_mlp(fused)                 
         prefix = prefix.view(B, self.prefix_len, gpt_dim)
         return prefix
 
@@ -65,7 +63,7 @@ class PrefixCaptioner(nn.Module):
         labels: Optional[torch.Tensor] = None,
     ) -> CaptionOutputs:
 
-        prefix = self.build_prefix(fused)  # (B, P, D)
+        prefix = self.build_prefix(fused)  
 
         # GPT token embeddings for caption tokens
         tok_emb = self.gpt.transformer.wte(input_ids)  # (B, L, D)
@@ -82,6 +80,7 @@ class PrefixCaptioner(nn.Module):
         attn = torch.cat([prefix_mask, attention_mask], dim=1)  # (B, P+L)
 
         if labels is not None:
+            # Ignore prefix positions when computing language modelling loss
             ignore = torch.full(
                 (labels.size(0), self.prefix_len),
                 -100,
@@ -146,7 +145,7 @@ class PrefixCaptioner(nn.Module):
 
         text = tokenizer.decode(gen[0], skip_special_tokens=True).strip()
 
-        # strip prompt if it appears
+        # Remove the fixed prompt prefix from the decoded output if present
         if text.lower().startswith(prompt.strip().lower()):
             text = text[len(prompt):].strip()
 

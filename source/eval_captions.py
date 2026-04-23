@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-import evaluate  # BLEU + ROUGE
+import evaluate  
 
 from dataset import UCMultimodalDataset
 from clip_model import ClipDualEncoder
@@ -118,7 +118,7 @@ def main():
     captioner.load_state_dict(torch.load(caption_ckpt, map_location=device))
     captioner.eval()
 
-    # ensure pad token is consistent
+    # Keep pad handling aligned with GPT decoding
     captioner.gpt.config.pad_token_id = tokenizer.eos_token_id
 
     # Dataset
@@ -141,7 +141,7 @@ def main():
         labels = batch["labels"].tolist()
         img_paths = batch["img_paths"]
 
-        # conditioning vector: [img_emb ; zeros] (must match training)
+        # Match training-time conditioning: image embedding concatenated with zero text branch
         img_emb = foundation.encode_image(images)  # (B,256)
         fused = torch.cat([img_emb, torch.zeros_like(img_emb)], dim=-1)  # (B,512)
 
@@ -161,7 +161,7 @@ def main():
                 no_repeat_ngram_size=args.no_repeat_ngram_size,
             )
 
-            # Build reference in same format you trained on
+            # Rebuild the reference caption in the same format used during training
             body = clean_caption_body(texts[i])
             mes_num = int(labels[i]) if not hasattr(labels[i], "item") else int(labels[i].item())
             ref = format_caption_with_mes(body, mes_num)
@@ -185,7 +185,6 @@ def main():
     preds = df["pred_caption"].astype(str).tolist()
     refs = df["ref_text"].astype(str).tolist()
 
-    # sacreBLEU expects list-of-list references
     bleu = evaluate.load("sacrebleu")
     bleu_res = bleu.compute(predictions=preds, references=[[r] for r in refs])
     bleu_score = float(bleu_res["score"])
