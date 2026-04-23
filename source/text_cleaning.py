@@ -32,7 +32,8 @@ def format_caption_with_mes(body: str, mes_num: int) -> str:
     body = body.strip()
     prefix = "Findings: "
     suffix = f" MES-{mes_num}."
-    eos = ""  # GPT-2 EOS is tokenizer.eos_token, we will append via tokenizer in code
+    # GPT-2 EOS is tokenizer.eos_token - appended via tokenizer
+    eos = ""  
     if not body:
         return prefix + suffix.strip()
     return prefix + body + suffix + eos
