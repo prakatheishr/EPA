@@ -106,7 +106,7 @@ Set dataset paths before running any scripts:
 
 ```bash
 export UC_DATA_CSV=path/to/data.csv
-export UC_IMAGE_ROOT=path/to/root/of/image_folder
+export UC_IMAGE_ROOT=path/to/parent/directory/of/image_folder
 ```
 
 ---
