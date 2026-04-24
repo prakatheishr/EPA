@@ -113,6 +113,8 @@ export UC_IMAGE_ROOT=path/to/parent/directory/of/image_folder
 
 ## Training Pipeline
 
+**(Image and Text encoders can be interchanged - the below are examples)**
+
 ### Step 1: Train CLIP Model
 
 ```bash
